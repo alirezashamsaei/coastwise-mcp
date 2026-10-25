@@ -3,7 +3,12 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { registerForecastTool, registerRateTool, type ToolDeps } from './tools.js';
+import {
+  registerForecastTool,
+  registerRateTool,
+  registerWindowTool,
+  type ToolDeps,
+} from './tools.js';
 
 /**
  * CoastWise MCP.
@@ -39,6 +44,7 @@ export function createServer(deps: ToolDeps = {}): McpServer {
 
   registerForecastTool(server, deps);
   registerRateTool(server, deps);
+  registerWindowTool(server, deps);
 
   return server;
 }

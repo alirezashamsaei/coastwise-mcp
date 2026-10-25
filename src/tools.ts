@@ -21,6 +21,7 @@ import {
   resolveWindow,
 } from './evaluate.js';
 import * as schemas from './schemas.js';
+import { findBestWindow } from './window.js';
 import type { ForecastResponse } from './types.js';
 
 /** Injection point so tests never reach the network. */
@@ -128,6 +129,49 @@ export function registerRateTool(server: McpServer, deps: ToolDeps = {}): void {
         }
 
         return ok(result);
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+}
+
+export function registerWindowTool(server: McpServer, deps: ToolDeps = {}): void {
+  server.registerTool(
+    'find_best_activity_window',
+    {
+      title: 'Find best activity window',
+      description:
+        'Slides a fixed 3-hour block across the requested window at hourly stride ' +
+        'and names the most suitable stretch, scoring each block by the mean of ' +
+        'its hours with the same rules as rate_activity_conditions. A candidate ' +
+        'counts only when all three consecutive hours carry every required ' +
+        'Factor; a gap disqualifies rather than bridges, and disqualified hours ' +
+        'are reported under skippedHours instead of being ranked. Returns every ' +
+        'evaluated candidate sorted by score, the hours that could not be ' +
+        'evaluated and why, and best: null with a reason when no 3-hour stretch ' +
+        'qualifies.',
+      inputSchema: schemas.evaluationShape,
+    },
+    async ({ latitude, longitude, date, activity, skillLevel, window }) => {
+      try {
+        // Validate before fetching: a bad input is not worth an upstream call.
+        const resolvedSkill = resolveSkillLevel(activity, skillLevel);
+        resolveWindow(window);
+
+        const pair = await fetchForecast({ latitude, longitude, date, fetcher: deps.fetcher });
+        const merged = mergeHours(pair.weather.hours, pair.marine.hours);
+
+        return ok(
+          findBestWindow({
+            activity,
+            skillLevel: resolvedSkill,
+            date,
+            hours: merged,
+            location: pair.location,
+            requestedWindow: window,
+          }),
+        );
       } catch (error) {
         return toErrorResult(error);
       }
