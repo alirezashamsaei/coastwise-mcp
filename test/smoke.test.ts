@@ -14,8 +14,8 @@ function text(result: { content: unknown }): string {
  * transport — no subprocess, no network, no files. Proves the MCP wiring
  * (list, call, input validation) actually works.
  */
-async function connected() {
-  const server = createServer();
+async function connected(deps: Parameters<typeof createServer>[0] = {}) {
+  const server = createServer(deps);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test', version: '0.0.0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -23,12 +23,13 @@ async function connected() {
 }
 
 describe('coastwise-mcp server', () => {
-  it('lists the smoke tool with its description', async () => {
+  it('lists the registered tools with their descriptions', async () => {
     const { client } = await connected();
     const { tools } = await client.listTools();
 
-    expect(tools.map((t) => t.name)).toEqual(['smoke_check']);
-    expect(tools[0]?.description).toContain('CoastWise');
+    expect(tools.map((t) => t.name)).toContain('smoke_check');
+    expect(tools.map((t) => t.name)).toContain('get_beach_forecast');
+    expect(tools.find((t) => t.name === 'smoke_check')?.description).toContain('CoastWise');
   });
 
   it('calls the smoke tool and returns the echoed text', async () => {

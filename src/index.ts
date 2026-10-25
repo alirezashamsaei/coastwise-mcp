@@ -3,17 +3,15 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { registerForecastTool, type ToolDeps } from './tools.js';
 
 /**
- * CoastWise MCP — ticket #10 scaffold.
- *
- * Registers one smoke-test tool so the server can be exercised end to end
- * (list + call + input validation) before the real forecast tools land.
+ * CoastWise MCP.
  *
  * Never write to stdout here: the stdio transport owns it and any stray line
  * corrupts the JSON-RPC stream. Log with console.error only.
  */
-export function createServer(): McpServer {
+export function createServer(deps: ToolDeps = {}): McpServer {
   const server = new McpServer({ name: 'coastwise-mcp', version: '0.1.0' });
 
   server.registerTool(
@@ -38,6 +36,8 @@ export function createServer(): McpServer {
       content: [{ type: 'text', text: Array.from({ length: count }, () => text).join(' ') }],
     }),
   );
+
+  registerForecastTool(server, deps);
 
   return server;
 }
