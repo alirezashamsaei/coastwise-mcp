@@ -49,10 +49,8 @@ import {
   FACTORS,
   FACTOR_META,
   REQUIRED_FACTORS,
-  bandFor,
   bandsFor,
   findBand,
-  isRequired,
   weightFor,
 } from './bands.js';
 import type { Band, Factor } from './bands.js';
@@ -208,11 +206,9 @@ export function evaluate(input: EvaluationInput): Evaluation {
   let raw = 0;
 
   for (const factor of FACTORS) {
-    const applicable = scored.has(factor);
-    const supplied = Object.prototype.hasOwnProperty.call(values, factor);
-    // Report a Factor this Activity scores, plus anything the caller handed us
-    // for context. Everything else stays out of the response.
-    if (!applicable && !supplied) continue;
+    // Only Factors this Activity scores appear in the response; a Factor the
+    // caller passed that §4.1 leaves as an em-dash is not ours to explain.
+    if (!scored.has(factor)) continue;
 
     const meta = FACTOR_META[factor];
     const requiredFlag = required.includes(factor);
@@ -289,6 +285,3 @@ export function evaluate(input: EvaluationInput): Evaluation {
 
   return { verdict: verdictFor(value), score, factors: rows, missingRequired: [] };
 }
-
-/** True when an Activity's evaluation cannot proceed without this Factor. */
-export { isRequired };
