@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../src/index.js';
 import type { Fetcher } from '../src/forecast.js';
 import { MARINE_ENDPOINT } from '../src/constants.js';
-import { aggregateHours, mergeHours, resolveWindow } from '../src/evaluate.js';
+import { MIXED_THRESHOLD, aggregateHours, mergeHours, resolveWindow } from '../src/evaluate.js';
 
 const DATE = '2026-10-27';
 
@@ -12,19 +12,29 @@ function timesFor(date: string): string[] {
   return Array.from({ length: 24 }, (_, i) => `${date}T${String(i).padStart(2, '0')}:00`);
 }
 
+type HourlyValue = number | null | Array<number | null>;
+
 interface Options {
-  weather?: Record<string, number | null>;
-  marine?: Record<string, number | null>;
+  weather?: Record<string, HourlyValue>;
+  marine?: Record<string, HourlyValue>;
 }
 
-/** Builds a payload whose every hour carries the same values. */
-function block(date: string, values: Record<string, number | null>) {
+/**
+ * Builds a payload. A scalar fills every hour; an array is written through
+ * verbatim so a fixture can put one odd hour inside an otherwise calm day.
+ */
+function block(date: string, values: Record<string, HourlyValue>) {
   const times = timesFor(date);
   const hourly: Record<string, Array<number | null>> = { time: times };
   for (const [factor, value] of Object.entries(values)) {
-    hourly[factor] = times.map(() => value);
+    hourly[factor] = Array.isArray(value) ? value : times.map(() => value);
   }
   return hourly;
+}
+
+/** A whole day of one WMO code, except the given hours (0-indexed). */
+function codesExcept(code: number, stormyHours: number[]): Array<number | null> {
+  return timesFor(DATE).map((_, i) => (stormyHours.includes(i) ? code : 0));
 }
 
 function payloads(date: string, options: Options = {}) {
@@ -246,9 +256,60 @@ describe('rate_activity_conditions — Vetoes', () => {
     expect(body.veto.id).toBe('thunderstorm');
     expect(body.veto.factor).toBe('weather_code');
     expect(body.veto.value).toBe(99);
+    expect(body.veto.unit).toBe('wmo code');
     expect(body.veto.reason).toMatch(/thunderstorm/i);
     expect(body.veto.overriddenScore).toBe(body.score.value);
     expect(body.score.value).toBeGreaterThan(0);
+
+    // Forcing it means overriding a verdict that was not already unfavorable:
+    // WMO 99 is scored −2 but the rest of the day still clears 70.
+    expect(body.score.value).toBeGreaterThanOrEqual(70);
+  });
+
+  it('forces unfavorable on frozen precipitation, which the score alone would not', async () => {
+    const { call, json } = await connected(
+      fetcherFor(...Object.values(payloads(DATE, { weather: { weather_code: 73 } }))),
+    );
+    const body = json(
+      await call('rate_activity_conditions', {
+        ...BASE,
+        activity: 'beach_day',
+      }),
+    );
+
+    expect(body.verdict).toBe('unfavorable');
+    expect(body.veto.id).toBe('frozen_precipitation');
+    expect(body.veto.factor).toBe('weather_code');
+    expect(body.veto.value).toBe(73);
+    expect(body.veto.unit).toBe('wmo code');
+    expect(body.veto.reason).toMatch(/frozen precipitation/i);
+    expect(body.veto.overriddenScore).toBe(body.score.value);
+    // Forcing it means the score alone would not have said unfavorable.
+    expect(body.score.value).toBeGreaterThanOrEqual(MIXED_THRESHOLD);
+  });
+
+  it('veto fires when a single hour is stormy and the mode code is clear sky', async () => {
+    // Two stormy hours out of the thirteen in the default window: the mode
+    // stays 0, so only the per-hour pass in pickVeto can catch this.
+    const stormyHours = [10, 11];
+    const { call, json } = await connected(
+      fetcherFor(
+        ...Object.values(payloads(DATE, { weather: { weather_code: codesExcept(95, stormyHours) } })),
+      ),
+    );
+    const body = json(await call('rate_activity_conditions', { ...BASE, activity: 'beach_day' }));
+
+    const windowCode = body.factors.find(
+      (f: { factor: string }) => f.factor === 'weather_code',
+    );
+    expect(windowCode.value).toBe(0);
+    expect(windowCode.score).toBe(2);
+
+    expect(body.verdict).toBe('unfavorable');
+    expect(body.veto.id).toBe('thunderstorm');
+    expect(body.veto.value).toBe(95);
+    expect(body.veto.overriddenScore).toBe(body.score.value);
+    expect(body.score.value).toBeGreaterThanOrEqual(70);
   });
 
   it('fires the wave ceiling for a beginner but not for an advanced surfer', async () => {
@@ -268,6 +329,48 @@ describe('rate_activity_conditions — Vetoes', () => {
     expect(beginner.verdict).toBe('unfavorable');
     expect(advanced.veto).toBeNull();
     expect(advanced.verdict).not.toBe('unfavorable');
+  });
+
+  it('forces unfavorable for surfing too — the two weather vetoes are activity-blind', async () => {
+    for (const [weatherCode, id] of [
+      [99, 'thunderstorm'],
+      [71, 'frozen_precipitation'],
+    ] as const) {
+      const { call, json } = await connected(
+        fetcherFor(...Object.values(payloads(DATE, { weather: { weather_code: weatherCode } }))),
+      );
+      const body = json(
+        await call('rate_activity_conditions', {
+          ...BASE,
+          activity: 'surfing',
+          skillLevel: 'advanced',
+        }),
+      );
+
+      expect(body.verdict, id).toBe('unfavorable');
+      expect(body.veto.id, id).toBe(id);
+      expect(body.veto.overriddenScore, id).toBe(body.score.value);
+      expect(body.score.value, id).toBeGreaterThanOrEqual(MIXED_THRESHOLD);
+    }
+  });
+
+  it('does not veto when the weather code itself is the missing evidence', async () => {
+    // weather_code is optional for surfing, so a null code cannot gate the
+    // window: the response scores normally, reports the hole, and vetoes nothing.
+    const { call, json } = await connected(
+      fetcherFor(...Object.values(payloads(DATE, { weather: { weather_code: null } }))),
+    );
+    const body = json(
+      await call('rate_activity_conditions', { ...BASE, activity: 'surfing', skillLevel: 'beginner' }),
+    );
+
+    expect(body.verdict).not.toBe('insufficient_data');
+    expect(body.score).not.toBeNull();
+    expect(body.veto).toBeNull();
+    const row = body.factors.find((f: { factor: string }) => f.factor === 'weather_code');
+    expect(row.value).toBeNull();
+    expect(row.contribution).toBeNull();
+    expect(body.missing.map((m: { factor: string }) => m.factor)).toContain('weather_code');
   });
 
   it('never vetoes when the evidence is missing', async () => {
