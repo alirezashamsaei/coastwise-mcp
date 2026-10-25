@@ -14,7 +14,7 @@ CoastWise answers one question over [MCP](https://modelcontextprotocol.io): *doe
 
 ## Quick start
 
-Requires **Node.js 18 or newer** (developed and CI-tested on 18, 20 and 22) and network access to `api.open-meteo.com` and `marine-api.open-meteo.com`.
+Requires **Node.js 22.12 or newer** — CI runs the suite on 22 and 24, and the test toolchain (vitest 5, which drives rolldown) refuses anything older. Node 18 and 20 are past end-of-life and are not supported. You also need network access to `api.open-meteo.com` and `marine-api.open-meteo.com`.
 
 ```bash
 git clone https://github.com/alirezashamsaei/coastwise-mcp.git

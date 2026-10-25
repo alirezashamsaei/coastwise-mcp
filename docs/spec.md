@@ -529,15 +529,19 @@ src/
 test/
   scoring.test.ts     bands, weights, normalization, verdict thresholds
   vetoes.test.ts      each veto, plus "missing data never vetoes"
-  missing.test.ts     required-factor gating → insufficient_data
-  window.test.ts      stride, gaps, no-qualifying-window
+  rate.test.ts        rate_activity_conditions end to end: happy path, input
+                      validation, vetoes, required-factor gating →
+                      insufficient_data, window aggregation
+  window.test.ts      stride count, gaps that do not bridge, no-qualifying-
+                      window, tie-break, off-hour bounds, agreement with rate
   forecast.test.ts    mocked fetch: params, 4xx, nulls, all-null marine
   tools.test.ts       end-to-end through the MCP handlers with a fake fetcher
+  smoke.test.ts       server boot: tool listing, echo, validation errors
 ```
 
 - **`@modelcontextprotocol/sdk` ^1.32.2** + `zod` ^4 (ADR-0003), `registerTool` API (`.tool()` is deprecated).
 - **vitest**; every HTTP call goes through an injectable fetcher. **No test touches the network.**
-- **Node ≥18** engines; dev environment is Node 24.
+- **Node ≥22.12** engines; dev environment is Node 24; CI matrix `[22, 24]`. The floor comes from vitest 5 (rolldown needs `^22.12.0 || ^24.0.0 || >=26.0.0`) — Node 18 and 20 are EOL and cannot run the suite.
 - No `console.log` — it corrupts the stdio JSON-RPC stream. `console.error` only.
 
 ---
@@ -550,7 +554,7 @@ Independently testable, in order. Each is a GitHub issue.
 2. **Fetch layer** — `forecast.ts` with injected fetcher; weather + marine param building, `timezone=auto`, `forecast_days` cap, all-null detection, HTTP-error mapping. *Test: `forecast.test.ts`.*
 3. **Bands + scoring** — `bands.ts`, `scoring.ts`: band lookup, contribution, normalization, verdict thresholds. *Test: `scoring.test.ts`.*
 4. **Vetoes** — `vetoes.ts`: three rules, plus proof that missing data never vetoes. *Test: `vetoes.test.ts`.*
-5. **Required-Factor gating** — per-activity sets → `insufficient_data`; optional factors skipped, not defaulted. *Test: `missing.test.ts`.*
+5. **Required-Factor gating** — per-activity sets → `insufficient_data`; optional factors skipped, not defaulted. *Test: `rate.test.ts` (`rate_activity_conditions — missing data`).*
 6. **`get_beach_forecast`** — handler + schema + output assembly (units, missing, limitations, attribution). *Test: part of `tools.test.ts`.*
 7. **`rate_activity_conditions`** — handler wiring scoring + vetoes + gating into the output shape. *Test: `tools.test.ts`.*
 8. **`find_best_activity_window`** — `window.ts` sliding search + handler. *Test: `window.test.ts`.*
