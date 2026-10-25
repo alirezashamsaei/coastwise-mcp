@@ -226,6 +226,10 @@ const WORST_REQUIRED: FactorValues = {
   wind_speed_10m: 45, // > 40 → −2
 };
 
+/** The required beach_day Factors, used as the base for optional-Factor cases. */
+const base: FactorValues = BEST_REQUIRED;
+
+
 describe('normalization (spec §3.2)', () => {
   it('gives a full-best day 100', () => {
     const result = evaluate({ activity: 'beach_day', values: BEST_REQUIRED });
@@ -355,11 +359,14 @@ describe('missing required Factors (spec §6)', () => {
   });
 
   it('never scores missing data as 0', () => {
-    const result = evaluate({ activity: 'beach_day', values: BEST_REQUIRED });
+    const values: FactorValues = { ...BEST_REQUIRED };
+    delete values.temperature_2m;
+    const result = evaluate({ activity: 'beach_day', values });
     const row = result.factors.find((f) => f.factor === 'temperature_2m');
     expect(row?.score).toBeNull();
     expect(row?.contribution).toBeNull();
     expect(row?.band).toBeNull();
+    expect(row?.value).toBeNull();
   });
 
   it('requires every §6 Factor for beach_day', () => {
@@ -378,8 +385,6 @@ describe('missing required Factors (spec §6)', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('optional Factors (spec §3.1)', () => {
-  const base: FactorValues = BEST_REQUIRED;
-
   it('skips an optional Factor that is null, exactly as if omitted', () => {
     const omitted = evaluate({ activity: 'beach_day', values: { ...base } });
     const nulled = evaluate({ activity: 'beach_day', values: { ...base, uv_index: null } });

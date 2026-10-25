@@ -459,9 +459,11 @@ export function bandsFor(
     case 'sea_surface_temperature':
       return SEA_SURFACE_BANDS;
     case 'wave_height':
-      return activity === 'surfing'
-        ? waveHeightBands[skillLevel ?? 'intermediate']
-        : WAVE_HEIGHT_BEACH_DAY;
+      if (activity !== 'surfing') return WAVE_HEIGHT_BEACH_DAY;
+      // §4.8's surfing table is per Skill level. Picking a default level would
+      // invent an assumption, so an absent Skill level yields no Band at all —
+      // §2.1 makes that an input error one layer up.
+      return skillLevel === undefined ? null : waveHeightBands[skillLevel];
   }
 }
 
