@@ -324,14 +324,15 @@ const WAVE_HEIGHT_BEACH_DAY: readonly Band[] = [
  * §4.8's `surfing` grid read as three separate tables, as the spec instructs.
  * Each is a *peak* curve: flat water and closing-out surf both score badly.
  *
- * These tables are closed at the top because the grid's top row for each skill
- * level is where that level's ceiling begins — `wave_above_skill_ceiling`
- * (§5) takes over above it, and `bandFor` returns `null` for an unbandable
- * value rather than assigning a Band the spec never defined.
+ * Every table is **total** — the ranges cover the whole number line with no
+ * gaps and no ceiling. That matters more than it looks: `evaluate` treats a
+ * present-but-unbandable value as `context_only`, so it contributes nothing
+ * while still satisfying the required-Factor gate. A table with a hole would
+ * therefore let a wildly unsuitable day score normally.
  *
- * The em-dash rows are simply absent: the merged grid's `—` means "this range is
- * not part of that level's table", not "score 0". That makes the three tables
- * structurally distinct, which is the point of reading them separately.
+ * Above each skill level's ceiling the curve has already fallen to its floor,
+ * so the open-ended band reads the same as the Veto would say; the Veto
+ * (§5 / `src/vetoes.ts`) still fires and reports the overridden score.
  */
 const WAVE_HEIGHT_SURFING: Readonly<Record<SkillLevel, readonly Band[]>> = {
   // ceiling 1.5 m
@@ -342,6 +343,10 @@ const WAVE_HEIGHT_SURFING: Readonly<Record<SkillLevel, readonly Band[]>> = {
     { min: 0.5, max: 1.0, score: 2, label: '0.5–1.0 m' },
     { min: 1.0, max: 1.3, score: 0, label: '1.0–1.3 m' },
     { min: 1.3, max: 1.8, score: -1, label: '1.3–1.8 m' },
+    // Open-ended: a table that stops short would leave large values
+    // unbandable while still counting as "present", so they would score
+    // no Contribution at all. The curve keeps falling instead.
+    { min: 1.8, max: Infinity, score: -2, label: '> 1.8 m' },
   ],
   // ceiling 2.5 m
   intermediate: [
@@ -354,10 +359,15 @@ const WAVE_HEIGHT_SURFING: Readonly<Record<SkillLevel, readonly Band[]>> = {
     { min: 1.8, max: 2.0, score: 2, label: '1.8–2.0 m' },
     { min: 2.0, max: 2.2, score: 0, label: '2.0–2.2 m' },
     { min: 2.2, max: 2.5, score: -1, label: '2.2–2.5 m' },
+    { min: 2.5, max: Infinity, score: -2, label: '> 2.5 m' },
   ],
   // ceiling 4.0 m
   advanced: [
     { min: -Infinity, max: 0.3, score: -2, label: '< 0.3 m' },
+    // The spec's merged grid left this cell as an em-dash, which would have
+    // made 0.3–0.4 m the one unbandable value in the whole table. Both
+    // neighbouring bands are −2, so the hole was a transcription gap.
+    { min: 0.3, max: 0.4, score: -2, label: '0.3–0.4 m' },
     { min: 0.4, max: 0.5, score: -2, label: '0.4–0.5 m' },
     { min: 0.5, max: 1.0, score: 0, label: '0.5–1.0 m' },
     { min: 1.0, max: 1.3, score: 0, label: '1.0–1.3 m' },
@@ -367,6 +377,7 @@ const WAVE_HEIGHT_SURFING: Readonly<Record<SkillLevel, readonly Band[]>> = {
     { min: 2.2, max: 2.5, score: 2, label: '2.2–2.5 m' },
     { min: 2.5, max: 3.2, score: 2, label: '2.5–3.2 m' },
     { min: 3.2, max: 4.0, score: 0, label: '3.2–4.0 m' },
+    { min: 4.0, max: Infinity, score: -2, label: '> 4.0 m' },
   ],
 } as const;
 

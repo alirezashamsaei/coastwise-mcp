@@ -45,5 +45,20 @@ export const window = z
 /** Location + date, shared by all three tools. */
 export const locationShape = { latitude, longitude, date };
 
-/** Location + date + activity, shared by the two evaluators. */
-export const evaluationShape = { latitude, longitude, date, activity, skillLevel, window };
+/**
+ * Location + date + activity, shared by the two evaluators.
+ *
+ * `skillLevel` and `window` are optional *here* even though the standalone
+ * exports above are not: they are validated conditionally by the handler
+ * (skillLevel only when `activity === 'surfing'`, window defaults when
+ * omitted), so marking them optional on the wire is correct — the handler
+ * still rejects a surfing call that lacks one.
+ */
+export const evaluationShape = {
+  latitude,
+  longitude,
+  date,
+  activity,
+  skillLevel: skillLevel.optional(),
+  window: window.optional(),
+};

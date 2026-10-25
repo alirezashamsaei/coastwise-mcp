@@ -154,12 +154,10 @@ describe('band boundaries (spec §4)', () => {
   });
 
   it('returns null rather than inventing a Band for an uncovered value', () => {
-    // §4.8 leaves advanced with no row for 0.3–0.4 m.
-    expect(bandFor('wave_height', 0.35, 'surfing', 'advanced')).toBeNull();
-    // Every surfing table stops at its ceiling.
-    expect(bandFor('wave_height', 1.8, 'surfing', 'beginner')).toBeNull();
-    expect(bandFor('wave_height', 3.0, 'surfing', 'intermediate')).toBeNull();
+    // Continuous tables are total by design, so the only gaps left are
+    // categorical: an unrecognised WMO code has no Band and no score.
     expect(bandFor('weather_code', 4, 'beach_day')).toBeNull();
+    expect(bandFor('weather_code', 999, 'surfing')).toBeNull();
   });
 
   it('refuses to band surfing wave height without a skill level', () => {
@@ -419,7 +417,9 @@ describe('optional Factors (spec §3.1)', () => {
     expect(result.missingRequired).toEqual([]);
   });
 
-  it('reports an unbandable optional value as context_only, not scored', () => {
+  it('reports an unbandable value as context_only, not scored', () => {
+    // Continuous tables are total, so the unbandable case only arises for a
+    // categorical Factor carrying a code the table does not know.
     const result = evaluate({
       activity: 'surfing',
       skillLevel: 'beginner',
@@ -427,23 +427,25 @@ describe('optional Factors (spec §3.1)', () => {
         temperature_2m: 22,
         precipitation: 0,
         wind_speed_10m: 15,
-        wave_height: 1.9, // above the beginner table's 1.8 m top
+        wave_height: 1.9,
         wave_period: 10,
+        weather_code: 999,
         sea_surface_temperature: 20,
       },
     });
 
-    const row = result.factors.find((f) => f.factor === 'wave_height');
+    const row = result.factors.find((f) => f.factor === 'weather_code');
     expect(row).toMatchObject({
-      value: 1.9,
+      value: 999,
       band: null,
       score: null,
       contribution: null,
       status: 'context_only',
     });
-    // A required Factor that could not be banded still scores: it is present.
+    // A Factor that could not be banded is still present, so the required
+    // gate does not fire — it simply contributes nothing.
     expect(result.verdict).not.toBe('insufficient_data');
-    expect(result.score?.attainableRange.max).toBeLessThan(80);
+    expect(result.score).not.toBeNull();
   });
 });
 
@@ -513,5 +515,81 @@ describe('determinism', () => {
       (level) => bandFor('wave_height', 0.8, 'surfing', level)?.score,
     );
     expect(scores).toEqual([2, 1, 0]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Totality: no Band table may leave a value unbandable                       */
+/* -------------------------------------------------------------------------- */
+
+describe('Band tables are total', () => {
+  const factors: Factor[] = [
+    'temperature_2m',
+    'weather_code',
+    'precipitation',
+    'wind_speed_10m',
+    'uv_index',
+    'wind_gusts_10m',
+    'wave_height',
+    'wave_period',
+    'swell_wave_height',
+    'swell_wave_period',
+    'sea_surface_temperature',
+  ];
+
+  // A present-but-unbandable value scores no Contribution while still
+  // satisfying the required-Factor gate, so a gap would let an obviously
+  // unsuitable day score normally. Every table must cover the number line.
+  it('covers every value from zero to well above any table', () => {
+    const probes = [0, 0.01, 0.29, 0.3, 0.49, 0.5, 1.49, 1.5, 1.79, 1.8, 2.1, 2.49, 2.5, 3.19, 3.2, 3.99, 4.0, 4.5, 6.5, 10, 40, 100, 1000];
+    // weather_code is categorical — an unknown code has no Band by design.
+    // Precipitation legitimately starts at zero: a negative value is not a
+    // gap in the table but a physically impossible input.
+    const continuous = factors.filter((f) => f !== 'weather_code');
+
+    for (const factor of continuous) {
+      for (const activity of ['beach_day', 'surfing'] as const) {
+        if (factor === 'wave_height') continue; // covered separately per skill level
+        if (weightFor(factor, activity) === null) continue;
+        for (const value of probes) {
+          expect(
+            bandFor(factor, value, activity),
+            `${factor} @ ${value} (${activity})`,
+          ).not.toBeNull();
+        }
+      }
+    }
+  });
+
+  it('bands negative temperatures — the one Factor whose scale crosses zero', () => {
+    for (const value of [-40, -10, -0.01, 0]) {
+      expect(bandFor('temperature_2m', value, 'beach_day'), String(value)).not.toBeNull();
+      expect(bandFor('temperature_2m', value, 'surfing'), String(value)).not.toBeNull();
+    }
+  });
+
+  it('covers every value at every surfing skill level', () => {
+    const probes = [-1, 0, 0.3, 0.35, 0.4, 0.5, 1.0, 1.3, 1.49, 1.5, 1.8, 2.0, 2.1, 2.49, 2.5, 3.0, 3.19, 3.2, 4.0, 4.01, 5, 12];
+    const levels: SkillLevel[] = ['beginner', 'intermediate', 'advanced'];
+
+    for (const level of levels) {
+      for (const value of probes) {
+        expect(bandFor('wave_height', value, 'surfing', level), `${level} @ ${value} m`).not.toBeNull();
+      }
+    }
+  });
+
+  it('keeps every surfing table monotonic downward past its ceiling', () => {
+    // Once a value exceeds the ceiling the curve must already sit at its
+    // floor, so the band and the veto agree about what the day is worth.
+    const levels: SkillLevel[] = ['beginner', 'intermediate', 'advanced'];
+    for (const level of levels) {
+      const above = bandFor('wave_height', WAVE_HEIGHT_CEILING[level] + 0.6, 'surfing', level);
+      expect(above?.score, level).toBe(-2);
+    }
+  });
+
+  it('bands the advanced 0.3–0.4 m value the spec left as an em-dash', () => {
+    expect(bandFor('wave_height', 0.35, 'surfing', 'advanced')?.score).toBe(-2);
   });
 });

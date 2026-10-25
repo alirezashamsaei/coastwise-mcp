@@ -128,6 +128,8 @@ export interface RatingResponse {
   missing: MissingFactor[];
   window: WindowSpec;
   location: LocationInfo;
+  /** Present only when a skill level was supplied for `beach_day`. */
+  unusedSkillLevel?: SkillLevel;
   limitations: string[];
 }
 

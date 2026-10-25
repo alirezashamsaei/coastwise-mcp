@@ -202,6 +202,18 @@ A Veto **reports the score anyway**, with `veto.overriddenScore`, so the overrid
 
 **Never:** substitute an assumed value for missing data; score missing data as `0`; fire a Veto on evidence we do not have.
 
+### 3.4 Window aggregation
+
+Both evaluators score a *window* of hours, not a single instant. Before Stage 1 runs, the window's hours collapse into one value per Factor:
+
+| Factor kind | Rule | Why |
+|---|---|---|
+| continuous (`temperature_2m`, `wave_height`, …) | **mean** across the window | the window is an average of conditions |
+| `weather_code` | **mode** (first-seen on ties) | WMO codes are categorical; averaging `0` and `3` invents `1.5`, a code nobody reported |
+| any Factor absent from **any** hour | window is `insufficient_data` | partial coverage is not coverage |
+
+A Veto is evaluated against **every hour** in the window, not against the aggregate: one thunderstorm in the window disqualifies the window, even when the modal code is clear sky.
+
 ---
 
 ## 4. Factor tables
@@ -239,6 +251,8 @@ A Veto **reports the score anyway**, with `veto.overriddenScore`, so the overrid
 | `26–32` | +2 |
 | `32–35` | +1 |
 | `≥ 35` | 0 |
+
+*Note:* 40 °C scores **0**, not negative. The curve flattens rather than falls — a scorching day is neutral by these rules, not penalized. If you want extreme heat penalized, change this row and the tests that assert it.
 
 ### 4.3 `weather_code` — WMO
 
@@ -326,6 +340,15 @@ High UV is not a beach positive — burn risk, so the curve peaks and falls.
 | `3.2–4.0` | — | — | 0 |
 
 Read as three separate tables at implementation time; the merged grid is documentation shorthand. Implement as `waveHeightBands[skillLevel]`.
+
+**The tables are total.** Two corrections to the grid above, both deliberate:
+
+1. **`advanced` gets a `0.3–0.4 m` row at −2.** The grid left it as an em-dash, which would have made it the one unbandable value in the table — and both neighbouring bands are −2, so the gap was a transcription slip.
+2. **Every table is open-ended at the top** (`> 1.8` beginner, `> 2.5` intermediate, `> 4.0` advanced, all at −2).
+
+Both matter because `evaluate` reports a present-but-unbandable value as `context_only`: it contributes nothing while still satisfying the required-Factor gate. A table with a hole would let a wildly unsuitable day score normally. The curve is already at its floor past the ceiling, so the band and the Veto agree about what the day is worth.
+
+`weather_code` is the one Factor where a `null` Band is correct — an unrecognised WMO code has no row and no score, and it is reported as `context_only` rather than guessed.
 
 ### 4.9 `wave_period` / `swell_wave_period` — s
 
@@ -459,6 +482,20 @@ Carried as a `limitations: string[]` so a client can never miss them:
 | All-null marine block | `marine.available = false`, reported; drives `insufficient_data` for `surfing` only. |
 
 Two different things get two different signals: **an upstream failure is an error; absent data is `insufficient_data`.**
+
+### 9.1 Spec errata
+
+Ambiguities found while implementing, and how they were resolved:
+
+| # | Conflict | Resolution |
+|---|---|---|
+| 1 | §4.4 precipitation `(0, 0.5]` closes high; §4 header mandates exclusive-high bands | **Header wins.** `0.5 mm/h` scores `0` (in `0.5–2`), not `+1`. The `= 0` row is a zero-width point band (`min === max`), a small extension of the Band model. |
+| 2 | §4.1 marks `weather_code` required for both Activities; §6's `surfing` row omits it | **§6 wins.** Surfing scores `weather_code` (weight 1) but does not require it. |
+| 3 | §4.3 weather-code rows say `VETO` with no number | Transcribed as `−2` (table floor) so a stormy day still normalizes; the real Veto lives in `vetoes.ts`. |
+| 4 | §2.3 describes "a required entry with `value: null`" as distinct from `status: 'optional_missing'` | `FactorDetail.status` is a three-value union with no fourth option: required-missing rows use `optional_missing` plus `required: true`. |
+| 5 | §4.8 grid holes | See §4.8 note above — tables made total. |
+| 6 | Normalization degenerate case (`min === max`, no considered Factors) | Unreachable: `evaluate` gates that case to `insufficient_data` before a score can be produced. |
+| 7 | §4.2 curve at `≥ 35 °C` scores `0`, not negative | Kept as written; flagged in §4.2. |
 
 ---
 

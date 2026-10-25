@@ -12,6 +12,14 @@ import type { Fetcher } from './forecast.js';
 import { ForecastError, InputError, collectMissing, fetchForecast } from './forecast.js';
 import { MARINE_FACTORS, WEATHER_FACTORS } from './forecast.js';
 import { LIMITATIONS } from './constants.js';
+import {
+  EvaluationInputError,
+  evaluateWindow,
+  hoursInRange,
+  mergeHours,
+  resolveSkillLevel,
+  resolveWindow,
+} from './evaluate.js';
 import * as schemas from './schemas.js';
 import type { ForecastResponse } from './types.js';
 
@@ -35,7 +43,9 @@ function fail(message: string): ToolResult {
 
 /** Turn a thrown error into an MCP error result with a readable message. */
 export function toErrorResult(error: unknown): ToolResult {
-  if (error instanceof InputError) return fail(`Invalid input: ${error.message}`);
+  if (error instanceof InputError || error instanceof EvaluationInputError) {
+    return fail(`Invalid input: ${error.message}`);
+  }
   if (error instanceof ForecastError) return fail(`Forecast unavailable: ${error.message}`);
   if (error instanceof Error) return fail(`Unexpected error: ${error.message}`);
   return fail('Unexpected error');
@@ -69,6 +79,55 @@ export function registerForecastTool(server: McpServer, deps: ToolDeps = {}): vo
           limitations: [...LIMITATIONS],
         };
         return ok(response);
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+}
+
+export function registerRateTool(server: McpServer, deps: ToolDeps = {}): void {
+  server.registerTool(
+    'rate_activity_conditions',
+    {
+      title: 'Rate activity conditions',
+      description:
+        'Deterministic suitability rating for one beach, one date, and one activity. ' +
+        'Returns a verdict, a 0-100 score normalized across the range attainable ' +
+        'here, the per-Factor explanation, and any Veto that overrode the score. ' +
+        'A missing required Factor yields insufficient_data rather than a guess.',
+      inputSchema: schemas.evaluationShape,
+    },
+    async ({ latitude, longitude, date, activity, skillLevel, window }) => {
+      try {
+        const resolvedSkill = resolveSkillLevel(activity, skillLevel);
+        const win = resolveWindow(window);
+
+        const pair = await fetchForecast({ latitude, longitude, date, fetcher: deps.fetcher });
+        const missing = [
+          ...collectMissing(pair.weather, 'weather', WEATHER_FACTORS),
+          ...collectMissing(pair.marine, 'marine', MARINE_FACTORS),
+        ];
+
+        const merged = mergeHours(pair.weather.hours, pair.marine.hours);
+        const inWindow = hoursInRange(merged, win.start, win.end);
+
+        const result = evaluateWindow({
+          activity,
+          skillLevel: resolvedSkill,
+          hours: inWindow,
+          location: pair.location,
+          requestedWindow: window,
+          missing,
+        });
+
+        // A skill level is meaningless for beach_day — report it rather than
+        // dropping it, so the caller can see their input was not applied.
+        if (activity === 'beach_day' && skillLevel !== undefined) {
+          result.unusedSkillLevel = skillLevel;
+        }
+
+        return ok(result);
       } catch (error) {
         return toErrorResult(error);
       }
